@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS Interface</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Import Google Gen AI SDK for Live API -->
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/genai": "https://esm.sh/@google/genai"
+        }
+      }
+    </script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #050510; /* Deep tech blue/black background */
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace; /* Techy font */
+            color: #4db8ff; /* Holographic blue text */
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1; /* Below UI */
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to canvas if needed, though mostly UI */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        /* Glassmorphism panels for a high-tech look */
+        .glass-panel {
+            background: rgba(10, 20, 40, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(77, 184, 255, 0.3);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            pointer-events: auto; /* Enable interaction on panels */
+        }
+
+        /* Glitch effect for titles */
+        .glitch-text {
+            position: relative;
+            color: #ffaa00; /* Matching the orange/gold core */
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(255, 170, 0, 0.8);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ff3333; /* Default offline/disconnected */
+            margin-right: 10px;
+            box-shadow: 0 0 10px #ff3333;
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        
+        .status-indicator.connected {
+            background-color: #33ff33;
+            box-shadow: 0 0 15px #33ff33;
+        }
+        
+        .status-indicator.listening {
+            background-color: #ffaa00;
+            box-shadow: 0 0 15px #ffaa00;
+            animation: pulse 1s infinite alternate;
+        }
+
+        @keyframes pulse {
+            from { opacity: 0.5; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1.1); }
+        }
+
+        /* Terminal styling for logs */
+        #terminal {
+            height: 200px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            line-height: 1.4;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #terminal p {
+            margin: 0.2rem 0;
+            border-bottom: 1px solid rgba(77, 184, 255, 0.1);
+            padding-bottom: 0.2rem;
+        }
+        
+        .log-user { color: #ffffff; }
+        .log-system { color: #ffaa00; }
+        .log-error { color: #ff3333; }
+
+        /* Custom Scrollbar for terminal */
+        #terminal::-webkit-scrollbar {
+            width: 6px;
+        }
+        #terminal::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.2);
+        }
+        #terminal::-webkit-scrollbar-thumb {
+            background: rgba(77, 184, 255, 0.5);
+            border-radius: 3px;
+        }
+
+        .control-btn {
+            background: rgba(255, 170, 0, 0.1);
+            border: 1px solid #ffaa00;
+            color: #ffaa00;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .control-btn:hover:not(:disabled) {
+            background: rgba(255, 170, 0, 0.3);
+            box-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
+        }
+        
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            border-color: #555;
+            color: #888;
+        }
+
+        .control-btn.active {
+            background: rgba(255, 50, 50, 0.2);
+            border-color: #ff3333;
+            color: #ff3333;
+        }
+        .control-btn.active:hover {
+            box-shadow: 0 0 15px rgba(255, 50, 50, 0.5);
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="ui-layer">
+    <!-- Top Header area -->
+    <div class="flex justify-between items-start w-full">
+        <div class="glass-panel min-w-[300px]">
+            <h1 class="text-2xl font-bold mb-2 glitch-text">J.A.R.V.I.S. v3.0</h1>
+            <div class="flex items-center text-sm">
+                <span id="connection-status" class="status-indicator"></span>
+                <span id="status-text" class="uppercase tracking-widest text-gray-400">System Standby</span>
+            </div>
+            <div class="mt-4 text-xs text-blue-300">
+                <p>Core Temp: <span id="ui-temp">Optimal</span></p>
+                <p>Network: <span id="ui-network">Secure</span></p>
+            </div>
+        </div>
+
+        <div class="glass-panel flex flex-col gap-3">
+             <button id="toggle-connection-btn" class="control-btn">
+                Initialize Core
+            </button>
+            <button id="mic-btn" class="control-btn" disabled>
+                Open Comms Link
+            </button>
+        </div>
+    </div>
+
+    <!-- Bottom Terminal Area -->
+    <div class="glass-panel w-full md:w-2/3 lg:w-1/2 mx-auto mt-auto">
+        <div class="flex justify-between items-center mb-2 border-b border-blue-900 pb-2">
+             <h2 class="text-sm uppercase text-gray-400 font-bold tracking-wider">Comms Log</h2>
+             <span class="text-xs text-blue-500 animate-pulse">Live Feed</span>
+        </div>
+        <div id="terminal">
+            <p class="log-system">[SYS] Interface loaded. Awaiting initialization.</p>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { GoogleGenAI, Modality, Blob } from '@google/genai';
+
+    // --- DOM Elements ---
+    const connectionStatusEl = document.getElementById('connection-status');
+    const statusTextEl = document.getElementById('status-text');
+    const toggleConnectionBtn = document.getElementById('toggle-connection-btn');
+    const micBtn = document.getElementById('mic-btn');
+    const terminalEl = document.getElementById('terminal');
+
+    // --- State Variables ---
+    let isConnected = false;
+    let isListening = false;
+    let sessionPromise = null;
+    let audioContext = null;
+    let inputAudioContext = null;
+    let outputAudioContext = null;
+    let mediaStream = null;
+    let activeSources = new Set();
+    let nextStartTime = 0;
+    
+    // API Configuration
+    const apiKey = ""; // Leave blank, injected by Canvas
+    const ai = new GoogleGenAI({apiKey: apiKey});
+    const MODEL_NAME = 'gemini-3.1-flash-live-preview';
+
+    // --- 3D Visualization (Three.js) ---
+    // Scene Setup
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x050510, 0.002); // Add depth
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 15;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0x000000, 0); // Transparent to show body background
+    container.appendChild(renderer.domElement);
+
+    // Core Group
+    const coreGroup = new THREE.Group();
+    scene.add(coreGroup);
+
+    // Colors matching the reference image (Orange/Gold holographics)
+    const colorPrimary = 0xffaa00;
+    const colorSecondary = 0xff6600;
+    const colorHighlight = 0xffffff;
+
+    // 1. Inner Energy Core (Glowing Sphere)
+    const innerGeometry = new THREE.SphereGeometry(1.5, 32, 32);
+    const innerMaterial = new THREE.MeshBasicMaterial({ 
+        color: colorHighlight, 
+        transparent: true, 
+        opacity: 0.9,
+        wireframe: false
+    });
+    const innerCore = new THREE.Mesh(innerGeometry, innerMaterial);
+    coreGroup.add(innerCore);
+
+    // Inner Glow
+    const glowMaterial = new THREE.MeshBasicMaterial({
+        color: colorPrimary,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending
+    });
+    const glowCore = new THREE.Mesh(new THREE.SphereGeometry(1.8, 32, 32), glowMaterial);
+    coreGroup.add(glowCore);
+
+    // 2. Complex Wireframe Spheres (The main structure)
+    function createWireframeSphere(radius, segments, color, opacity, rotationSpeed) {
+        const geo = new THREE.SphereGeometry(radius, segments, segments);
+        
+        // Slightly displace vertices to make it look less perfect and more "holographic data"
+        const posAttribute = geo.attributes.position;
+        for (let i = 0; i < posAttribute.count; i++) {
+            const v = new THREE.Vector3().fromBufferAttribute(posAttribute, i);
+            const noise = (Math.random() - 0.5) * 0.2; // Small distortion
+            v.add(v.clone().normalize().multiplyScalar(noise));
+            posAttribute.setXYZ(i, v.x, v.y, v.z);
+        }
+        geo.computeVertexNormals();
+
+        const mat = new THREE.MeshBasicMaterial({
+            color: color,
+            wireframe: true,
+            transparent: true,
+            opacity: opacity,
+            blending: THREE.AdditiveBlending
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.userData.rotationSpeed = rotationSpeed;
+        return mesh;
+    }
+
+    const layers = [];
+    // Middle dense layer
+    const layer1 = createWireframeSphere(4, 40, colorPrimary, 0.4, { x: 0.005, y: 0.01, z: 0.002 });
+    coreGroup.add(layer1);
+    layers.push(layer1);
+
+    // Outer sparse, faster layer
+    const layer2 = createWireframeSphere(6, 24, colorSecondary, 0.3, { x: -0.002, y: 0.015, z: -0.005 });
+    coreGroup.add(layer2);
+    layers.push(layer2);
+    
+    // Largest faint outline
+    const layer3 = createWireframeSphere(8, 16, colorPrimary, 0.15, { x: 0.001, y: -0.005, z: 0.01 });
+    coreGroup.add(layer3);
+    layers.push(layer3);
+
+    // 3. Orbiting Data Rings
+    function createDataRing(radius, tube, color, rotationAxis, speed) {
+        const geo = new THREE.TorusGeometry(radius, tube, 2, 100); // 2 radial segments for flat look
+        
+        // Custom material to look like dashed data lines
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0,0,256,16);
+        ctx.fillStyle = 'white';
+        // Draw dashes
+        for(let i=0; i<256; i+=16) {
+            if(Math.random() > 0.3) {
+                ctx.fillRect(i, 0, Math.random()*12 + 2, 16);
+            }
+        }
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.repeat.set(10, 1);
+
+        const mat = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.7,
+            map: texture,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+        
+        const ring = new THREE.Mesh(geo, mat);
+        ring.userData = { axis: rotationAxis, speed: speed, texture: texture };
+        return ring;
+    }
+
+    const rings = [];
+    const ring1 = createDataRing(5.5, 0.05, colorHighlight, new THREE.Vector3(1, 1, 0).normalize(), 0.02);
+    coreGroup.add(ring1);
+    rings.push(ring1);
+
+    const ring2 = createDataRing(7, 0.08, colorPrimary, new THREE.Vector3(0, 1, 1).normalize(), -0.015);
+    coreGroup.add(ring2);
+    rings.push(ring2);
+
+    const ring3 = createDataRing(9, 0.03, colorSecondary, new THREE.Vector3(1, 0, 1).normalize(), 0.01);
+    coreGroup.add(ring3);
+    rings.push(ring3);
+
+    // 4. Data Particles (Floating points around core)
+    const particleCount = 2000;
+    const particleGeo = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleSpeeds = [];
+
+    for (let i = 0; i < particleCount * 3; i += 3) {
+        // Position them in a spherical volume
+        const r = 3 + Math.random() * 8;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos((Math.random() * 2) - 1);
+        
+        particlePositions[i] = r * Math.sin(phi) * Math.cos(theta);
+        particlePositions[i+1] = r * Math.sin(phi) * Math.sin(theta);
+        particlePositions[i+2] = r * Math.cos(phi);
+
+        particleSpeeds.push({
+            speed: Math.random() * 0.02 + 0.005,
+            axis: new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize()
+        });
+    }
+    
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    
+    // Create custom particle material for glowing points
+    const particleMat = new THREE.PointsMaterial({
+        color: colorPrimary,
+        size: 0.1,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending
+    });
+    
+    const particles = new THREE.Points(particleGeo, particleMat);
+    coreGroup.add(particles);
+
+
+    // Mouse interaction
+    let mouseX = 0;
+    let mouseY = 0;
+    let targetX = 0;
+    let targetY = 0;
+    const windowHalfX = window.innerWidth / 2;
+    const windowHalfY = window.innerHeight / 2;
+
+    document.addEventListener('mousemove', (event) => {
+        mouseX = (event.clientX - windowHalfX);
+        mouseY = (event.clientY - windowHalfY);
+    });
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- Audio Utility Functions ---
+    // AudioWorklet string defining the processor to capture raw mic data
+    const workletCode = `
+    class RecorderProcessor extends AudioWorkletProcessor {
+      process(inputs, outputs, parameters) {
+        const input = inputs[0];
+        if (input.length > 0) {
+          // Send Float32Array to main thread
+          this.port.postMessage(input[0]);
+        }
+        return true;
+      }
+    }
+    registerProcessor('recorder-processor', RecorderProcessor);
+    `;
+
+    // Convert Float32Array (from worklet) to Int16 PCM, then base64 for API
+    function createBlob(data) {
+        const l = data.length;
+        const int16 = new Int16Array(l);
+        for (let i = 0; i < l; i++) {
+            // Clamp and convert to 16-bit PCM
+            const s = Math.max(-1, Math.min(1, data[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        return {
+            data: encodeBase64(new Uint8Array(int16.buffer)),
+            mimeType: 'audio/pcm;rate=16000',
+        };
+    }
+
+    // Custom Base64 encode for Uint8Array
+    function encodeBase64(bytes) {
+        let binary = '';
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+
+    // Custom Base64 decode to Uint8Array
+    function decodeBase64(base64) {
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+    }
+
+    // Decode raw PCM 16-bit audio received from API into an AudioBuffer
+    async function decodeAudioData(data, ctx, sampleRate, numChannels) {
+        const dataInt16 = new Int16Array(data.buffer);
+        const frameCount = dataInt16.length / numChannels;
+        const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+        for (let channel = 0; channel < numChannels; channel++) {
+            const channelData = buffer.getChannelData(channel);
+            for (let i = 0; i < frameCount; i++) {
+                // Convert back to float [-1, 1]
+                channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+            }
+        }
+        return buffer;
+    }
+
+    // --- UI Helper Functions ---
+    function logToTerminal(message, type = 'system') {
+        const p = document.createElement('p');
+        
+        let prefix = '[SYS]';
+        p.className = 'log-system';
+        
+        if (type === 'user') {
+            prefix = '[YOU]';
+            p.className = 'log-user';
+        } else if (type === 'error') {
+            prefix = '[ERR]';
+            p.className = 'log-error';
+        }
+        
+        p.textContent = `${prefix} ${message}`;
+        terminalEl.appendChild(p);
+        
+        // Auto scroll to bottom
+        terminalEl.scrollTop = terminalEl.scrollHeight;
+    }
+
+    // Variables for transcription state to handle streaming chunks
+    let currentInputTranscription = '';
+    let currentOutputTranscription = '';
+
+    // --- Gemini Live API Integration ---
+    
+    async function setupAudioContexts() {
+        if (!inputAudioContext) {
+            // Must be 16kHz for input to Gemini
+            inputAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            // Add worklet module
+            const workletBlob = new window.Blob([workletCode], { type: "application/javascript" });
+            const workletUrl = URL.createObjectURL(workletBlob);
+            await inputAudioContext.audioWorklet.addModule(workletUrl);
+        }
+        if (!outputAudioContext) {
+             // System default for best output quality (browser will resample the 24kHz API output)
+            outputAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+
+    async function connectLiveSession() {
+        logToTerminal('Initiating handshake with Core Server...');
+        statusTextEl.textContent = 'Connecting...';
+        
+        try {
+            await setupAudioContexts();
+
+            // Request mic access
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                }
+            });
+
+            logToTerminal('Hardware links established. Authenticating...');
+
+            sessionPromise = ai.live.connect({
+                model: MODEL_NAME,
+                callbacks: {
+                    onopen: () => {
+                        logToTerminal('Core Initialized. Online.');
+                        isConnected = true;
+                        
+                        // Update UI
+                        connectionStatusEl.classList.remove('listening');
+                        connectionStatusEl.classList.add('connected');
+                        statusTextEl.textContent = 'Online & Active';
+                        toggleConnectionBtn.textContent = 'Shutdown Core';
+                        micBtn.disabled = false;
+                        
+                        // Increase core activity visually
+                        targetCoreIntensity = 1.0;
+                        
+                        // Optional: Send initial prompt to trigger greeting
+                        sessionPromise.then(session => {
+                             session.sendRealtimeInput({ text: "System online. Acknowledge." });
+                        });
+                    },
+                    onmessage: async (message) => {
+                        // Handle Transcriptions
+                        if (message.serverContent?.outputTranscription) {
+                            currentOutputTranscription += message.serverContent.outputTranscription.text;
+                        } else if (message.serverContent?.inputTranscription) {
+                            currentInputTranscription += message.serverContent.inputTranscription.text;
+                        }
+
+                        if (message.serverContent?.turnComplete) {
+                            if (currentInputTranscription) {
+                                logToTerminal(currentInputTranscription.trim(), 'user');
+                            }
+                            if (currentOutputTranscription) {
+                                logToTerminal(currentOutputTranscription.trim(), 'system');
+                                // Make core react to speaking
+                                coreReactToSpeech(); 
+                            }
+                            currentInputTranscription = '';
+                            currentOutputTranscription = '';
+                        }
+
+                        // Handle Audio Output
+                        const base64EncodedAudioString = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
+                        if (base64EncodedAudioString) {
+                            // Ensure output context is running (fixes autoplay policy issues if started silently)
+                            if (outputAudioContext.state === 'suspended') {
+                                await outputAudioContext.resume();
+                            }
+
+                            nextStartTime = Math.max(nextStartTime, outputAudioContext.currentTime);
+                            
+                            const audioBytes = decodeBase64(base64EncodedAudioString);
+                            // Gemini always outputs 24kHz audio
+                            const audioBuffer = await decodeAudioData(audioBytes, outputAudioContext, 24000, 1);
+                            
+                            const source = outputAudioContext.createBufferSource();
+                            source.buffer = audioBuffer;
+                            source.connect(outputAudioContext.destination);
+                            
+                            source.addEventListener('ended', () => {
+                                activeSources.delete(source);
+                            });
+
+                            source.start(nextStartTime);
+                            nextStartTime = nextStartTime + audioBuffer.duration;
+                            activeSources.add(source);
+                            
+                            // Visual reaction while playing audio
+                            coreReactToSpeech();
+                        }
+
+                        // Handle Interruption (User started speaking while AI was talking)
+                        const interrupted = message.serverContent?.interrupted;
+                        if (interrupted) {
+                            logToTerminal('Playback interrupted.', 'system');
+                            for (const source of activeSources.values()) {
+                                source.stop();
+                                activeSources.delete(source);
+                            }
+                            nextStartTime = 0;
+                        }
+                    },
+                    onerror: (e) => {
+                        console.error('Session Error:', e);
+                        logToTerminal(`System Error: Connection disrupted.`, 'error');
+                        disconnectSession();
+                    },
+                    onclose: () => {
+                        logToTerminal('Core Connection Terminated.');
+                        disconnectSession();
+                    }
+                },
+                config: {
+                    responseModalities: [Modality.AUDIO],
+                    speechConfig: {
+                        // Charon is informative/formal, good for an AI assistant
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } },
+                    },
+                    systemInstruction: `You are JARVIS, an advanced, highly intelligent, and slightly dry-witted AI assistant. 
+                    Keep responses concise, technical, and helpful. Refer to the user as 'Sir' or 'Boss'. 
+                    Maintain character at all times.`,
+                    outputAudioTranscription: {},
+                    inputAudioTranscription: {},
+                    realtimeInputConfig: {
+                        // We use manual detection controlled by the UI button
+                        automaticActivityDetection: { disabled: true },
+                    },
+                }
+            });
+
+        } catch (error) {
+            console.error('Failed to connect:', error);
+            logToTerminal(`Failed to initialize: ${error.message}`, 'error');
+            statusTextEl.textContent = 'System Fault';
+        }
+    }
+
+    function disconnectSession() {
+        isConnected = false;
+        isListening = false;
+        
+        connectionStatusEl.classList.remove('connected', 'listening');
+        statusTextEl.textContent = 'System Standby';
+        toggleConnectionBtn.textContent = 'Initialize Core';
+        micBtn.disabled = true;
+        micBtn.textContent = 'Open Comms Link';
+        micBtn.classList.remove('active');
+        
+        targetCoreIntensity = 0.2; // Return to standby visual
+
+        // Stop audio playback
+        for (const source of activeSources.values()) {
+            try { source.stop(); } catch (e) {}
+        }
+        activeSources.clear();
+        nextStartTime = 0;
+
+        // Stop media stream tracks
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+        }
+
+        // We can't explicitly 'close' the session Promise easily, but stopping input handles it mostly.
+        sessionPromise = null;
+    }
+
+    // Audio recording nodes
+    let mediaSourceNode = null;
+    let recorderNode = null;
+
+    async function toggleListening() {
+        if (!isConnected || !sessionPromise) return;
+
+        if (isListening) {
+            // Stop Listening
+            isListening = false;
+            micBtn.textContent = 'Open Comms Link';
+            micBtn.classList.remove('active');
+            connectionStatusEl.classList.remove('listening');
+            connectionStatusEl.classList.add('connected');
+            statusTextEl.textContent = 'Online & Active';
+            logToTerminal('Comms link closed. Processing...', 'system');
+
+            // Send End Activity Marker
+            sessionPromise.then(session => {
+                session.sendRealtimeInput({ activityEnd: {} });
+            });
+
+            // Disconnect audio nodes
+            if (recorderNode) {
+                recorderNode.disconnect();
+                recorderNode = null;
+            }
+            if (mediaSourceNode) {
+                mediaSourceNode.disconnect();
+                mediaSourceNode = null;
+            }
+
+        } else {
+            // Start Listening
+            isListening = true;
+            micBtn.textContent = 'Close Comms Link';
+            micBtn.classList.add('active');
+            connectionStatusEl.classList.remove('connected');
+            connectionStatusEl.classList.add('listening');
+            statusTextEl.textContent = 'Receiving Audio...';
+            logToTerminal('Comms link open. Listening...', 'system');
+
+            // Ensure Context is running
+            if (inputAudioContext.state === 'suspended') {
+                await inputAudioContext.resume();
+            }
+
+            // Send Start Activity Marker
+            sessionPromise.then(session => {
+                session.sendRealtimeInput({ activityStart: {} });
+            });
+
+            // Setup recording pipeline
+            mediaSourceNode = inputAudioContext.createMediaStreamSource(mediaStream);
+            recorderNode = new AudioWorkletNode(inputAudioContext, 'recorder-processor');
+
+            recorderNode.port.onmessage = (event) => {
+                const inputData = event.data;
+                const pcmBlob = createBlob(inputData);
+                
+                // Only send if we still have a valid promise
+                if (sessionPromise) {
+                     sessionPromise.then((session) => {
+                         session.sendRealtimeInput({ audio: pcmBlob });
+                     });
+                }
+            };
+
+            mediaSourceNode.connect(recorderNode);
+            // Must connect worklet to destination to keep it processing, even if silent
+            recorderNode.connect(inputAudioContext.destination);
+        }
+    }
+
+
+    // --- Event Listeners ---
+    toggleConnectionBtn.addEventListener('click', () => {
+        if (isConnected) {
+            disconnectSession();
+        } else {
+            connectLiveSession();
+        }
+    });
+
+    micBtn.addEventListener('click', () => {
+        toggleListening();
+    });
+
+    // --- Animation Loop ---
+    let currentCoreIntensity = 0.2; // Standby
+    let targetCoreIntensity = 0.2;
+    let clock = new THREE.Clock();
+
+    function coreReactToSpeech() {
+        // Temporarily boost intensity for visual feedback
+        targetCoreIntensity = 1.5;
+        setTimeout(() => {
+            if (isConnected) targetCoreIntensity = 1.0;
+        }, 500);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        const time = clock.getElapsedTime();
+
+        // Smooth camera movement based on mouse
+        targetX = mouseX * 0.001;
+        targetY = mouseY * 0.001;
+        
+        coreGroup.rotation.y += 0.05 * (targetX - coreGroup.rotation.y);
+        coreGroup.rotation.x += 0.05 * (targetY - coreGroup.rotation.x);
+
+        // Smooth intensity transition
+        currentCoreIntensity += (targetCoreIntensity - currentCoreIntensity) * 0.05;
+
+        // Animate Layers
+        layers.forEach((layer, index) => {
+            const speed = layer.userData.rotationSpeed;
+            // Base rotation + intensity boost
+            layer.rotation.x += speed.x * (1 + currentCoreIntensity);
+            layer.rotation.y += speed.y * (1 + currentCoreIntensity);
+            layer.rotation.z += speed.z * (1 + currentCoreIntensity);
+            
+            // Pulse opacity slightly
+            layer.material.opacity = layer.userData.baseOpacity !== undefined ? 
+                layer.userData.baseOpacity : layer.material.opacity;
+            layer.userData.baseOpacity = layer.material.opacity;
+            
+            layer.material.opacity = layer.userData.baseOpacity * (0.8 + 0.4 * Math.sin(time * 2 + index));
+        });
+
+        // Animate Rings
+        rings.forEach(ring => {
+             // Rotate around custom axis
+             ring.rotateOnAxis(ring.userData.axis, ring.userData.speed * (1 + currentCoreIntensity*0.5));
+             // Scroll texture to make dashed lines move
+             ring.userData.texture.offset.x -= ring.userData.speed * 10;
+        });
+
+        // Animate Inner Core Glow
+        innerCore.material.opacity = 0.8 + 0.2 * Math.sin(time * 5);
+        glowCore.scale.setScalar(1 + 0.1 * Math.sin(time * 3) + (currentCoreIntensity - 0.2)*0.2);
+        
+        // Adjust color based on intensity (brighter/whiter when active)
+        const activeColor = new THREE.Color(colorPrimary).lerp(new THREE.Color(colorHighlight), Math.min(1, currentCoreIntensity - 0.5));
+        innerCore.material.color = activeColor;
+        glowCore.material.color = activeColor;
+
+        // Animate Particles
+        const positions = particles.geometry.attributes.position.array;
+        let pIndex = 0;
+        
+        // Dynamic rotation matrix for particles
+        const rotMat = new THREE.Matrix4().makeRotationY(0.002 * (1+currentCoreIntensity));
+        const vec = new THREE.Vector3();
+
+        for (let i = 0; i < particleCount; i++) {
+            vec.set(positions[pIndex], positions[pIndex+1], positions[pIndex+2]);
+            
+            // Rotate around center
+            vec.applyMatrix4(rotMat);
+            
+            positions[pIndex] = vec.x;
+            positions[pIndex+1] = vec.y;
+            positions[pIndex+2] = vec.z;
+            
+            pIndex += 3;
+        }
+        particles.geometry.attributes.position.needsUpdate = true;
+        
+        // Optional UI updates based on time (fake stats)
+        if (Math.random() > 0.95) {
+             document.getElementById('ui-temp').textContent = isConnected ? (45 + Math.random()*15).toFixed(1) + '°C' : 'Optimal';
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    // Start animation loop when window loads
+    window.onload = function() {
+        animate();
+    };
+
+</script>
+
+</body>
+</html>
