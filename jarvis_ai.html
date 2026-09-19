@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jarvis AI Hand Gesture Interface</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050a15;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Courier New', Courier, monospace;
+            color: #ffaa00;
+        }
+
+        #video-container {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 160px;
+            height: 120px;
+            border: 2px solid #ffaa00;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(255, 170, 0, 0.5);
+            z-index: 10;
+            opacity: 0.8;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror the video */
+        }
+
+        canvas#jarvisCanvas {
+            display: block;
+            filter: drop-shadow(0 0 20px rgba(255, 170, 0, 0.4));
+        }
+
+        .ui-text {
+            position: absolute;
+            color: rgba(255, 170, 0, 0.8);
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            pointer-events: none;
+            text-shadow: 0 0 5px rgba(255, 170, 0, 0.8);
+            z-index: 5;
+        }
+        .top-left { top: 20px; left: 20px; }
+        .bottom-left { bottom: 20px; left: 20px; max-width: 60%; }
+        
+        #status-log {
+            font-size: 12px;
+            color: #ffdd66;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="ui-text top-left">
+        J.A.R.V.I.S. INTERFACE<br>
+        STATUS: <span id="status-text">STANDBY</span>
+    </div>
+    
+    <div class="ui-text bottom-left">
+        GESTURE LOG:<br>
+        <div id="status-log">Waiting for hand...</div>
+    </div>
+
+    <!-- Hidden camera feed -->
+    <div id="video-container">
+        <video id="input_video" autoplay playsinline></video>
+    </div>
+
+    <canvas id="jarvisCanvas"></canvas>
+
+    <!-- Load MediaPipe and Speech Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script>
+        // --- 1. JARVIS VISUAL ENGINE (Canvas) ---
+        const canvas = document.getElementById('jarvisCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, centerX, centerY;
+        let time = 0;
+        let isListening = false;
+
+        const config = {
+            color: '#ffaa00',
+            glowColor: 'rgba(255, 170, 0, 0.8)',
+            particleColor: '#ffdd66',
+            lineWidth: 1.5,
+            sphereRadius: 150
+        };
+
+        const particles = [];
+        const numParticles = 150;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            centerX = width / 2;
+            centerY = height / 2;
+            config.sphereRadius = Math.min(width, height) * 0.25;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function initParticles() {
+            particles.length = 0;
+            for (let i = 0; i < numParticles; i++) {
+                particles.push({
+                    x: (Math.random() - 0.5) * 2,
+                    y: (Math.random() - 0.5) * 2,
+                    z: (Math.random() - 0.5) * 2,
+                    size: Math.random() * 2 + 0.5,
+                    speed: Math.random() * 0.02 + 0.005,
+                    angle: Math.random() * Math.PI * 2
+                });
+            }
+        }
+        initParticles();
+
+        function project3D(x, y, z, radius) {
+            const scale = 300 / (300 + z); 
+            return { x: centerX + x * radius * scale, y: centerY + y * radius * scale, scale: scale };
+        }
+
+        function drawCore() {
+            const pulse = Math.sin(time * 0.05) * 0.2 + (isListening ? 1.2 : 0.8);
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, config.sphereRadius * 0.8);
+            gradient.addColorStop(0, `rgba(255, 255, 200, ${0.8 * pulse})`);
+            gradient.addColorStop(0.3, `rgba(255, 170, 0, ${0.5 * pulse})`);
+            gradient.addColorStop(1, 'rgba(255, 170, 0, 0)');
+            
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, config.sphereRadius * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, config.sphereRadius * 0.15 * pulse, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowBlur = 30;
+            ctx.shadowColor = config.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawRings() {
+            ctx.lineWidth = config.lineWidth;
+            ctx.strokeStyle = config.glowColor;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = config.color;
+
+            const rotSpeed = isListening ? 0.05 : 0.02;
+
+            ctx.beginPath(); ctx.ellipse(centerX, centerY, config.sphereRadius, config.sphereRadius * 0.3, time * rotSpeed, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.ellipse(centerX, centerY, config.sphereRadius * 0.8, config.sphereRadius * 0.2, time * -rotSpeed + Math.PI/4, 0, Math.PI * 2); ctx.stroke();
+            ctx.beginPath(); ctx.ellipse(centerX, centerY, config.sphereRadius * 0.4, config.sphereRadius, time * rotSpeed, 0, Math.PI * 2); ctx.stroke();
+            
+            ctx.beginPath(); ctx.arc(centerX, centerY, config.sphereRadius * 1.1, time * 0.05, time * 0.05 + Math.PI * 0.8); ctx.stroke();
+            ctx.beginPath(); ctx.arc(centerX, centerY, config.sphereRadius * 1.1, time * 0.05 + Math.PI, time * 0.05 + Math.PI + Math.PI * 0.8); ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawParticles() {
+            ctx.fillStyle = config.particleColor;
+            ctx.shadowBlur = 5;
+            ctx.shadowColor = config.color;
+
+            particles.forEach(p => {
+                p.angle += p.speed;
+                const px = Math.cos(p.angle) * p.x - Math.sin(p.angle) * p.z;
+                const pz = Math.sin(p.angle) * p.x + Math.cos(p.angle) * p.z;
+                const py = p.y;
+                const depth = (pz + 1) / 2;
+                const alpha = depth * 0.8 + 0.2;
+                const proj = project3D(px, py, pz, config.sphereRadius);
+                
+                ctx.beginPath();
+                ctx.arc(proj.x, proj.y, p.size * proj.scale, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 221, 102, ${alpha})`;
+                ctx.fill();
+            });
+            ctx.shadowBlur = 0;
+        }
+
+        function animate() {
+            ctx.fillStyle = 'rgba(5, 10, 21, 0.2)';
+            ctx.fillRect(0, 0, width, height);
+            time++;
+            drawCore();
+            drawParticles();
+            drawRings();
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        // --- 2. GESTURE RECOGNITION & AI LOGIC ---
+        const videoElement = document.getElementById('input_video');
+        const statusText = document.getElementById('status-text');
+        const statusLog = document.getElementById('status-log');
+        
+        let lastGesture = "";
+        let gestureCooldown = false;
+
+        // Voice Recognition Setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = function() {
+                isListening = true;
+                statusText.innerText = "LISTENING...";
+                statusLog.innerText = "Speak now...";
+            };
+
+            recognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript.toLowerCase();
+                statusLog.innerText = `You said: "${transcript}"`;
+                processAnswer(transcript);
+            };
+
+            recognition.onerror = function(event) {
+                statusLog.innerText = "Microphone error. Check permissions.";
+                isListening = false;
+                statusText.innerText = "STANDBY";
+            };
+
+            recognition.onend = function() {
+                isListening = false;
+                statusText.innerText = "STANDBY";
+            };
+        } else {
+            statusLog.innerText = "Speech Recognition not supported in this browser.";
+        }
+
+        // Jarvis Speech Synthesis
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.0;
+            utterance.pitch = 0.8; // Slightly robotic lower pitch
+            utterance.volume = 1;
+            window.speechSynthesis.speak(utterance);
+            statusLog.innerText = `Jarvis: "${text}"`;
+        }
+
+        // Process the user's voice input (Basic AI Logic)
+        function processAnswer(transcript) {
+            let reply = "";
+            if (transcript.includes("hello") || transcript.includes("hi")) {
+                reply = "Hello Sir. How can I assist you today?";
+            } else if (transcript.includes("who are you")) {
+                reply = "I am Jarvis, your personal AI assistant.";
+            } else if (transcript.includes("time")) {
+                const now = new Date();
+                reply = `The current time is ${now.getHours()}:${now.getMinutes()}`;
+            } else if (transcript.includes("your name")) {
+                reply = "My name is Jarvis.";
+            } else {
+                reply = "I heard you, but I am a simple demo. I cannot process that request yet.";
+            }
+            speak(reply);
+        }
+
+        // MediaPipe Hands Setup
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onResults);
+
+        function onResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                statusLog.innerText = "Show your hand to the camera...";
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            const fingerCount = countFingers(landmarks);
+
+            // Update UI based on finger count
+            statusLog.innerText = `Gesture detected: ${fingerCount} finger(s)`;
+
+            // Gesture Logic (with cooldown to prevent spamming)
+            if (gestureCooldown) return;
+
+            if (fingerCount === 1 && lastGesture !== "1") {
+                lastGesture = "1";
+                triggerCooldown();
+                statusLog.innerText = "Gesture: 1 Finger - Activating Microphone...";
+                speak("Listening for your question.");
+                setTimeout(() => {
+                    if (recognition) recognition.start();
+                }, 1500); // Wait for Jarvis to finish speaking
+            } 
+            else if (fingerCount === 2 && lastGesture !== "2") {
+                lastGesture = "2";
+                triggerCooldown();
+                speak("Hello Sir. Systems are online.");
+            } 
+            else if (fingerCount === 5 && lastGesture !== "5") {
+                lastGesture = "5";
+                triggerCooldown();
+                speak("Shutting down. Goodbye.");
+            } 
+            else if (fingerCount === 0) {
+                lastGesture = "0";
+            }
+        }
+
+        function triggerCooldown() {
+            gestureCooldown = true;
+            setTimeout(() => {
+                gestureCooldown = false;
+                lastGesture = ""; // Reset to allow same gesture again
+            }, 3000); // 3 second cooldown
+        }
+
+        // Simple algorithm to count extended fingers
+        function countFingers(landmarks) {
+            let count = 0;
+            
+            // Finger tip indices: Thumb(4), Index(8), Middle(12), Ring(16), Pinky(20)
+            // Finger joint indices: Thumb(2), Index(6), Middle(10), Ring(14), Pinky(18)
+            
+            // Check Index, Middle, Ring, Pinky (Y-axis comparison)
+            // Note: In MediaPipe, Y is 0 at top, 1 at bottom. So tip Y < joint Y means finger is up.
+            if (landmarks[8].y < landmarks[6].y) count++;  // Index
+            if (landmarks[12].y < landmarks[10].y) count++; // Middle
+            if (landmarks[16].y < landmarks[14].y) count++; // Ring
+            if (landmarks[20].y < landmarks[18].y) count++; // Pinky
+
+            // Check Thumb (X-axis comparison based on handedness)
+            // This is a simplified check. For left/right hand, the logic reverses.
+            // We assume the user is showing their palm.
+            if (landmarks[4].x < landmarks[2].x) { // Right hand thumb open
+                 count++; 
+            } else if (landmarks[4].x > landmarks[2].x) { // Left hand thumb open
+                 count++;
+            }
+
+            return count;
+        }
+
+        // Start Camera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 320,
+            height: 240
+        });
+        
+        // Only start camera if we are not on a file:// protocol (security)
+        if (window.location.protocol !== 'file:') {
+            camera.start().catch(err => {
+                statusLog.innerText = "Camera Error: " + err.message;
+            });
+        } else {
+            statusLog.innerText = "Please run this on a Local Server or HTTPS website, not file://";
+        }
+
+    </script>
+</body>
+</html>
